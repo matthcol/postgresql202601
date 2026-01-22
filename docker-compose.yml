@@ -1,0 +1,35 @@
+services:
+  db:
+    build:
+      context: .
+      args:
+        DB_TAG: ${DB_TAG}
+    image: postgiscity:${DB_TAG}
+    environment:
+      POSTGRES_PASSWORD: ${DB_ROOT_PASSWORD}
+      POSTGRES_USER: ${DB_ROOT_USER}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - ${DB_PORT}:5432
+    volumes:
+      - ./scripts:/scripts
+      - dbdata:/var/lib/postgresql
+      - backup:/backup
+
+  gui:
+    image: dpage/pgadmin4:${GUI_TAG}
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${GUI_USER}
+      PGADMIN_DEFAULT_PASSWORD: ${GUI_PASSWORD}
+    ports:
+      - ${GUI_PORT}:80
+    volumes:
+      - guidata:/var/lib/pgadmin
+      - ./servers.json:/pgadmin4/servers.json
+      - ./scripts:/scripts
+      
+
+volumes:
+  dbdata:
+  backup:
+  guidata:
