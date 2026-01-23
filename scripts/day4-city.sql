@@ -120,7 +120,196 @@ SELECT generer_positions_fictives(
     '2026-01-20'::TIMESTAMPTZ
 );
 
-select count(*) from position;
+select 'position' as "table", count(*) as nb_rows from position
+UNION
+select 'position_2024' as "table", count(*) as nb_rows from position_2024
+UNION
+select 'position_2025' as "table", count(*) as nb_rows from position_2025
+UNION
+select 'position_2026' as "table", count(*) as nb_rows from position_2026;
+
+
+select *
+from position
+where horodatage >= '2025-07-01'
+;
+
+
+create index idx_position_geom on position using gist(geom_pt);
+select * from pg_indexes where tablename like 'position%';
+
+
+create unique index idx_departement_insee_dep on departement_shp (insee_dep); -- ou unique constraint
+
+-- passage dans les Landes en 2025 : partition explicite
+select
+    *
+from
+    position_2025 p,
+    departement_shp d
+where
+    d.insee_dep = '40'
+    and st_within(p.geom_pt, d.geom)
+;
+
+select
+    *
+from
+    position p,
+    departement_shp d
+where
+    d.insee_dep = '40'
+    and st_within(p.geom_pt, d.geom)
+    and p.horodatage >= '2025-01-01 00:00Z'::timestamptz
+    and p.horodatage < '2026-01-01 00:00Z'::timestamptz
+;
+
+-- nouvelle année:
+
+insert into position (horodatage, geom_pt, company)
+values ('2027-02-28 12:34Z'::timestamptz, 'POINT (100000 6000000)', 'World Company');
+-- [23514] ERROR: no partition of relation "position" found for row
+--   Détail : Partition key of the failing row contains (horodatage) = (2027-02-28 12:34:00+00).
+
+create table position_2027
+partition of position
+for values from ('2027-01-01 00:00Z'::timestamptz) to ('2028-01-01 00:00Z'::timestamptz);
+
+insert into position (horodatage, geom_pt, company)
+values ('2027-02-28 12:34Z'::timestamptz, 'POINT (100000 6000000)', 'World Company');
+
+-- archivage de la partition 2024 avec pg_dump
+
+-- suppresion vieille partition (archivée)
+drop table position_2024;
+
+
+-- reintegration d'une partition archivée
+
+-- DDL : recreation de la table partition
+CREATE TABLE formation.position_2024 (
+    id bigint DEFAULT nextval('formation.position_id_seq'::regclass) CONSTRAINT position_id_not_null NOT NULL,
+    horodatage timestamp with time zone CONSTRAINT position_horodatage_not_null NOT NULL,
+    geom_pt public.geometry(Point,2154) CONSTRAINT position_geom_pt_not_null NOT NULL,
+    company character varying(100)
+);
+
+-- Data : restauration data avec psql ou pg_restore
+-- psql -U dax -d dbcity -f archive-position_2024-data.sql
+
+-- reattacher la partition
+ALTER TABLE ONLY position ATTACH PARTITION formation.position_2024 FOR VALUES FROM ('2024-01-01 00:00:00+00') TO ('2025-01-01 00:00:00+00');
+
+select * from pg_indexes where tablename like 'position%';
+
+---------------------------------------------------------------------
+SELECT
+    grantee,
+    table_schema,
+    table_name,
+    privilege_type
+FROM information_schema.role_table_grants
+WHERE grantee = 'dax';
+
+
+----------------------------------------------------------------------------------------------------
+--
+drop table position;
+
+-- 1st level : table principale partitionnée par compagnie
+create table position(
+  position_id bigserial,
+  horodatage timestamptz not null,
+  company_id int not null,
+  geom_pt geometry(Point, 2154) not null,
+  constraint pk_position primary key(position_id, company_id, horodatage)
+) partition by list(company_id);
+
+create index idx_position_geom_pt on position using gist(geom_pt);
+
+-- 2nd level : partition par compagnie partitionnée par horodatage
+create table position_company1
+    partition of position for values in (1)
+    partition by range(horodatage)
+;
+
+create table position_company2
+    partition of position for values in (2)
+    partition by range(horodatage)
+;
+
+create table position_company3
+    partition of position for values in (3)
+    partition by range(horodatage)
+;
+
+create table position_company_dev
+    partition of position for values in (4,5,7)
+    partition by range(horodatage)
+;
+
+-- 3d level compagnie + horodatage
+create table position_company1_2024
+    partition of position_company1
+        for values from ('2024-01-01 00:00Z'::timestamptz) to ('2025-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company1_2025
+    partition of position_company1
+        for values from ('2025-01-01 00:00Z'::timestamptz) to ('2026-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company1_2026
+    partition of position_company1
+        for values from ('2026-01-01 00:00Z'::timestamptz) to ('2027-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company2_2024
+    partition of position_company2
+        for values from ('2024-01-01 00:00Z'::timestamptz) to ('2025-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company2_2025
+    partition of position_company2
+        for values from ('2025-01-01 00:00Z'::timestamptz) to ('2026-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company2_2026
+    partition of position_company2
+        for values from ('2026-01-01 00:00Z'::timestamptz) to ('2027-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company3_2024
+    partition of position_company3
+        for values from ('2024-01-01 00:00Z'::timestamptz) to ('2025-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company3_2025
+    partition of position_company3
+        for values from ('2025-01-01 00:00Z'::timestamptz) to ('2026-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company3_2026
+    partition of position_company3
+        for values from ('2026-01-01 00:00Z'::timestamptz) to ('2027-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company_dev_2024
+    partition of position_company_dev
+        for values from ('2024-01-01 00:00Z'::timestamptz) to ('2025-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company_dev_2025
+    partition of position_company_dev
+        for values from ('2025-01-01 00:00Z'::timestamptz) to ('2026-01-01 00:00Z'::timestamptz)
+;
+
+create table position_company_dev_2026
+    partition of position_company_dev
+        for values from ('2026-01-01 00:00Z'::timestamptz) to ('2027-01-01 00:00Z'::timestamptz)
+;
+
+
 
 
 
